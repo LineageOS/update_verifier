@@ -1,5 +1,7 @@
 from __future__ import print_function
 
+import asn1crypto
+import oscrypto
 from asn1crypto.cms import ContentInfo
 from asn1crypto.algos import DigestAlgorithmId
 from oscrypto.asymmetric import rsa_pkcs1v15_verify, load_public_key
@@ -14,7 +16,7 @@ FOOTER_SIZE = 6
 EOCD_HEADER_SIZE = 22
 
 
-class SignedFile(object):
+class SignedZIP(object):
     def __init__(self, filepath):
         self._comment_size = None
         self._eocd = None
@@ -75,7 +77,7 @@ class SignedFile(object):
 
     def check_valid(self):
         assert self.footer[2] == 255 and self.footer[3] == 255, (
-            "Footer has wrong magic")
+            "Footer has wrong magic, this file probably isn't signed")
         assert self.signature_start <= self.comment_size, (
             "Signature start larger than comment")
         assert self.signature_start > FOOTER_SIZE, (
@@ -84,10 +86,10 @@ class SignedFile(object):
         assert self.eocd[0:4] == bytearray([80, 75, 5, 6]), (
             "EOCD has wrong magic")
         with open(self.filepath, 'rb') as zipfile:
-            for i in range(0, self.eocd_size-1):
+            for i in range(0, self.eocd_size - 1):
                 zipfile.seek(-i, os.SEEK_END)
                 assert bytearray(zipfile.read(4)) != bytearray(
-                    [80, 75, 5, 6]), ("Multiple EOCD magics; possible exploit")
+                    [80, 75, 5, 6]), "Multiple EOCD magics; possible exploit"
         return True
 
     def verify(self, pubkey):
@@ -106,6 +108,84 @@ class SignedFile(object):
         return rsa_pkcs1v15_verify(keydata, sig_contents, message, sig_type)
 
 
+class SignedAttributes(asn1crypto.core.Sequence):
+    _fields = [
+        ('target', asn1crypto.core.PrintableString),
+        ('length', asn1crypto.core.Integer),
+    ]
+
+    def to_bytes(self):
+        return self._header + self._contents
+
+
+class CertDetails(asn1crypto.core.Sequence):
+    _fields = [
+        ('format_version', asn1crypto.core.Integer),
+        ('certificate', asn1crypto.x509.Certificate),
+        ('algorithm', asn1crypto.x509.SignedDigestAlgorithm),
+        ('attributes', SignedAttributes),
+        ('signature', asn1crypto.core.OctetString),
+    ]
+
+
+class SignedImage(object):
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.length = os.path.getsize(filepath)
+        self.sig_length = 0
+        self.raw_signature = None
+
+    def process(self):
+        with open(self.filepath, 'rb') as zipfile:
+            magic = zipfile.read(8).decode('ascii')
+
+            kernel_size = self.read_int(zipfile)
+            zipfile.seek(4, os.SEEK_CUR)  # kernel_addr
+            ramdsk_size = self.read_int(zipfile)
+            zipfile.seek(4, os.SEEK_CUR)  # ramdsk_addr
+            second_size = self.read_int(zipfile)
+            zipfile.seek(8, os.SEEK_CUR)
+            page_size = self.read_int(zipfile)
+            header_ver = self.read_int(zipfile)
+
+            if header_ver != 0:
+                raise NotImplementedError(f"Header versions other than"
+                                          f" 0 not supported (got {header_ver})")
+            # Ceil to nearest page size
+            self.sig_length += self.round_to(kernel_size, page_size)
+            self.sig_length += self.round_to(ramdsk_size, page_size)
+            self.sig_length += self.round_to(second_size, page_size)
+
+            zipfile.seek(self.sig_length, os.SEEK_SET)
+            self.raw_signature = zipfile.read()
+
+    def verify(self, pub_key_path):
+        self.process()
+        with open(self.filepath, 'rb') as zipfile:
+            zipfile.seek(0, os.SEEK_SET)
+            signed_portion = zipfile.read(self.sig_length)
+
+        cert_details = CertDetails.load(self.raw_signature)
+        pub_key = load_public_key(pub_key_path)
+        sig = cert_details['signature']
+        signed_portion += cert_details['attributes'].to_bytes()
+
+        return rsa_pkcs1v15_verify(
+            pub_key,
+            sig.contents,
+            signed_portion,
+            cert_details['algorithm'].hash_algo
+        )
+
+    @staticmethod
+    def read_int(file):
+        return int.from_bytes(file.read(4), byteorder='little')
+
+    @staticmethod
+    def round_to(a, b):
+        return a + (b - (a % b))
+
+
 def main():
     parser = argparse.ArgumentParser(description='Verifies whole file signed '
                                                  'Android update files')
@@ -113,7 +193,13 @@ def main():
     parser.add_argument('zipfile')
     args = parser.parse_args()
 
-    signed_file = SignedFile(args.zipfile)
+    signed_file = SignedZIP(args.zipfile)
+    with open(args.zipfile, 'rb') as f:
+        try:
+            if f.read(8).decode('ascii') == "ANDROID!":
+                signed_file = SignedImage(args.zipfile)
+        except UnicodeDecodeError as e:
+            pass
     try:
         signed_file.verify(args.public_key)
         print("verified successfully", file=sys.stderr)
