@@ -15,23 +15,20 @@ EOCD_HEADER_SIZE = 22
 
 
 class SignedFile(object):
-    def __init__(self, filepath):
+    def __init__(self, zipdata):
         self._comment_size = None
         self._eocd = None
         self._eocd_size = None
         self._footer = None
         self._signed_len = None
         self._signature_start = None
-        self.filepath = filepath
-        self.length = os.path.getsize(filepath)
+        self.zipdata = zipdata
 
     @property
     def footer(self):
         if self._footer is not None:
             return self._footer
-        with open(self.filepath, 'rb') as zipfile:
-            zipfile.seek(-FOOTER_SIZE, os.SEEK_END)
-            self._footer = bytearray(zipfile.read())
+        self._footer = self.zipdata[-FOOTER_SIZE:]
         return self._footer
 
     @property
@@ -59,17 +56,14 @@ class SignedFile(object):
     def eocd(self):
         if self._eocd is not None:
             return self._eocd
-        with open(self.filepath, 'rb') as zipfile:
-            zipfile.seek(-self.eocd_size, os.SEEK_END)
-            eocd = bytearray(zipfile.read(self.eocd_size))
-        self._eocd = eocd
+        self._eocd = self.zipdata[-self.eocd_size:]
         return self._eocd
 
     @property
     def signed_len(self):
         if self._signed_len is not None:
             return self._signed_len
-        signed_len = self.length - self.eocd_size + EOCD_HEADER_SIZE - 2
+        signed_len = len(self.zipdata) - self.eocd_size + EOCD_HEADER_SIZE - 2
         self._signed_len = signed_len
         return self._signed_len
 
@@ -80,24 +74,19 @@ class SignedFile(object):
             "Signature start larger than comment")
         assert self.signature_start > FOOTER_SIZE, (
             "Signature inside footer or outside file")
-        assert self.length >= self.eocd_size, "EOCD larger than length"
+        assert len(self.zipdata) >= self.eocd_size, "EOCD larger than length"
         assert self.eocd[0:4] == bytearray([80, 75, 5, 6]), (
             "EOCD has wrong magic")
-        with open(self.filepath, 'rb') as zipfile:
-            for i in range(0, self.eocd_size-1):
-                zipfile.seek(-i, os.SEEK_END)
-                assert bytearray(zipfile.read(4)) != bytearray(
-                    [80, 75, 5, 6]), ("Multiple EOCD magics; possible exploit")
+        for i in range(0, self.eocd_size-1):
+            assert bytearray(self.zipdata[-i:-i+4]) != bytearray(
+                [80, 75, 5, 6]), ("Multiple EOCD magics; possible exploit")
         return True
 
     def verify(self, pubkey):
         self.check_valid()
-        with open(self.filepath, 'rb') as zipfile:
-            zipfile.seek(0, os.SEEK_SET)
-            message = zipfile.read(self.signed_len)
-            zipfile.seek(-self.signature_start, os.SEEK_END)
-            signature_size = self.signature_start - FOOTER_SIZE
-            signature_raw = zipfile.read(signature_size)
+        message = self.zipdata[0:self.signed_len]
+        signature_size = self.signature_start - FOOTER_SIZE
+        signature_raw = self.zipdata[-self.signature_start:-self.signature_start+signature_size]
         sig = ContentInfo.load(signature_raw)['content']['signer_infos'][0]
         sig_contents = sig['signature'].contents
         sig_type = DigestAlgorithmId.map(sig['digest_algorithm']['algorithm'].dotted)
@@ -113,7 +102,10 @@ def main():
     parser.add_argument('zipfile')
     args = parser.parse_args()
 
-    signed_file = SignedFile(args.zipfile)
+    with open(args.zipfile, 'rb') as zipfile:
+        zipdata = zipfile.read()
+
+    signed_file = SignedFile(zipdata)
     try:
         signed_file.verify(args.public_key)
         print("verified successfully", file=sys.stderr)
