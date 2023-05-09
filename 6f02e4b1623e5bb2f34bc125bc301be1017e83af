@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "94b1a530_740cc116",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 15734
+      },
+      "writtenOn": "2023-05-09T14:17:45Z",
+      "side": 1,
+      "message": "Somewhat non-optimal at the moment, doing a bunch of bytes-slicing basically doubles the memory usage. `memoryview` would most likely fix that, but the oscrypto package doesn\u0027t support that yet.",
+      "revId": "6f02e4b1623e5bb2f34bc125bc301be1017e83af",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
