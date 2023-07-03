@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "a81b4408_13cfd048",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 15734
+      },
+      "writtenOn": "2023-07-03T14:42:36Z",
+      "side": 1,
+      "message": "I wonder if we could relax the version requirement a bit, something like `\u003e\u003d1,\u003c2`. Evidently, we aren\u0027t using any special features, considering that the code itself is unchanged ever since 0.x.",
+      "revId": "973fc4318e6d19343f2f1c1b4422b9bdc55ac497",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
