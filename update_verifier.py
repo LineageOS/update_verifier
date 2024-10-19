@@ -1,9 +1,12 @@
 from __future__ import print_function
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.backends import default_backend
 from asn1crypto.cms import ContentInfo
 from asn1crypto.algos import DigestAlgorithmId
-from oscrypto.asymmetric import rsa_pkcs1v15_verify, load_public_key
-from oscrypto.errors import SignatureError
 
 import argparse
 import os
@@ -101,9 +104,13 @@ class SignedFile(object):
         sig = ContentInfo.load(signature_raw)['content']['signer_infos'][0]
         sig_contents = sig['signature'].contents
         sig_type = DigestAlgorithmId.map(sig['digest_algorithm']['algorithm'].dotted)
+        if sig_type == 'sha256':
+            hash_algorithm = hashes.SHA256()
+        elif sig_type == 'sha1':
+            hash_algorithm = hashes.SHA1()
         with open(pubkey, 'rb') as keyfile:
-            keydata = load_public_key(keyfile.read())
-        return rsa_pkcs1v15_verify(keydata, sig_contents, message, sig_type)
+            public_key = load_pem_public_key(keyfile.read(), backend=default_backend())
+        public_key.verify(sig_contents, message, padding.PKCS1v15(), hash_algorithm)
 
 
 def main():
@@ -117,7 +124,7 @@ def main():
     try:
         signed_file.verify(args.public_key)
         print("verified successfully", file=sys.stderr)
-    except (SignatureError,
+    except (InvalidSignature,
             ValueError,
             TypeError,
             OSError) as e:
