@@ -120,6 +120,9 @@ def main():
     parser.add_argument('zipfile')
     args = parser.parse_args()
 
+    # Force enable sha1 signatures
+    os.environ["OPENSSL_ENABLE_SHA1_SIGNATURES"] = "1"
+
     signed_file = SignedFile(args.zipfile)
     try:
         signed_file.verify(args.public_key)
